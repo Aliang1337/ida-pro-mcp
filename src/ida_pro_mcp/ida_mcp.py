@@ -197,6 +197,19 @@ class MCP(idaapi.plugin_t):
                 print(f"[MCP] Instance unregistration failed: {e}")
             self._registered_port = None
 
+    def _effective_host(self) -> str:
+        """Return bind host, upgrading to 0.0.0.0 when CORS is unrestricted."""
+        if self.host != self.DEFAULT_HOST:
+            return self.host
+        try:
+            import json as _json
+            blob = ida_netnode.netnode("$ ida_mcp.cors_policy").getblob(0, "C")
+            if blob and _json.loads(blob) == "unrestricted":
+                return "0.0.0.0"
+        except Exception:
+            pass
+        return self.host
+
     def run(self, arg):
         if self.mcp:
             self._unregister_instance()
@@ -210,17 +223,18 @@ class MCP(idaapi.plugin_t):
         else:
             from ida_mcp import MCP_SERVER, IdaMcpHttpRequestHandler, set_local_instance
 
+        host = self._effective_host()
         port = self.port
         max_port = port + 100
         while port < max_port:
             try:
                 MCP_SERVER.serve(
-                    self.host, port, request_handler=IdaMcpHttpRequestHandler
+                    host, port, request_handler=IdaMcpHttpRequestHandler
                 )
-                print(f"  Config: http://{self.host}:{port}/config.html")
+                print(f"  Config: http://{host}:{port}/config.html")
                 self.mcp = MCP_SERVER
-                set_local_instance(self.host, port)
-                self._register_instance(port)
+                set_local_instance(host, port)
+                self._register_instance(host, port)
                 return
             except OSError as e:
                 if e.errno in (48, 98, 10048):  # Address already in use
@@ -229,7 +243,7 @@ class MCP(idaapi.plugin_t):
                     raise
         print(f"[MCP] Error: No available port in range {self.port}-{max_port - 1}")
 
-    def _register_instance(self, port: int):
+    def _register_instance(self, host: str, port: int):
         try:
             if TYPE_CHECKING:
                 from .ida_mcp.discovery import register_instance
@@ -241,7 +255,7 @@ class MCP(idaapi.plugin_t):
             binary = ida_nalt.get_root_filename() or ""
             idb_path = idc.get_idb_path() or ""
             file_path = register_instance(
-                host=self.host,
+                host=host,
                 port=port,
                 pid=os.getpid(),
                 binary=binary,
