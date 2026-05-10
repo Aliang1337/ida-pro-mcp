@@ -147,13 +147,18 @@ class MCP(idaapi.plugin_t):
     DEFAULT_PORT = 13337
 
     def init(self):
+        import os
+
         hotkey = MCP.wanted_hotkey.replace("-", "+")
         if __import__("sys").platform == "darwin":
             hotkey = hotkey.replace("Alt", "Option")
 
         self.mcp: "ida_mcp.rpc.McpServer | None" = None
-        self.host = self.DEFAULT_HOST
-        self.port = self.DEFAULT_PORT
+        self.host = os.environ.get("IDA_MCP_HOST", self.DEFAULT_HOST)
+        try:
+            self.port = int(os.environ.get("IDA_MCP_PORT", self.DEFAULT_PORT))
+        except (ValueError, TypeError):
+            self.port = self.DEFAULT_PORT
         self.autostart = _get_autostart()
 
         if self.autostart and ida_kernwin.is_idaq():
