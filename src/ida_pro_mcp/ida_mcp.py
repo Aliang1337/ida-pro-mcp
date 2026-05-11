@@ -147,18 +147,13 @@ class MCP(idaapi.plugin_t):
     DEFAULT_PORT = 13337
 
     def init(self):
-        import os
-
         hotkey = MCP.wanted_hotkey.replace("-", "+")
         if __import__("sys").platform == "darwin":
             hotkey = hotkey.replace("Alt", "Option")
 
         self.mcp: "ida_mcp.rpc.McpServer | None" = None
-        self.host = os.environ.get("IDA_MCP_HOST", self.DEFAULT_HOST)
-        try:
-            self.port = int(os.environ.get("IDA_MCP_PORT", self.DEFAULT_PORT))
-        except (ValueError, TypeError):
-            self.port = self.DEFAULT_PORT
+        self.host = self.DEFAULT_HOST
+        self.port = self.DEFAULT_PORT
         self.autostart = _get_autostart()
 
         if self.autostart and ida_kernwin.is_idaq():
@@ -197,19 +192,6 @@ class MCP(idaapi.plugin_t):
                 print(f"[MCP] Instance unregistration failed: {e}")
             self._registered_port = None
 
-    def _effective_host(self) -> str:
-        """Return bind host, upgrading to 0.0.0.0 when CORS is unrestricted."""
-        if self.host != self.DEFAULT_HOST:
-            return self.host
-        try:
-            import json as _json
-            blob = ida_netnode.netnode("$ ida_mcp.cors_policy").getblob(0, "C")
-            if blob and _json.loads(blob) == "unrestricted":
-                return "0.0.0.0"
-        except Exception:
-            pass
-        return self.host
-
     def run(self, arg):
         if self.mcp:
             self._unregister_instance()
@@ -223,18 +205,17 @@ class MCP(idaapi.plugin_t):
         else:
             from ida_mcp import MCP_SERVER, IdaMcpHttpRequestHandler, set_local_instance
 
-        host = self._effective_host()
         port = self.port
         max_port = port + 100
         while port < max_port:
             try:
                 MCP_SERVER.serve(
-                    host, port, request_handler=IdaMcpHttpRequestHandler
+                    self.host, port, request_handler=IdaMcpHttpRequestHandler
                 )
-                print(f"  Config: http://{host}:{port}/config.html")
+                print(f"  Config: http://{self.host}:{port}/config.html")
                 self.mcp = MCP_SERVER
-                set_local_instance(host, port)
-                self._register_instance(host, port)
+                set_local_instance(self.host, port)
+                self._register_instance(port)
                 return
             except OSError as e:
                 if e.errno in (48, 98, 10048):  # Address already in use
@@ -243,7 +224,7 @@ class MCP(idaapi.plugin_t):
                     raise
         print(f"[MCP] Error: No available port in range {self.port}-{max_port - 1}")
 
-    def _register_instance(self, host: str, port: int):
+    def _register_instance(self, port: int):
         try:
             if TYPE_CHECKING:
                 from .ida_mcp.discovery import register_instance
@@ -255,7 +236,7 @@ class MCP(idaapi.plugin_t):
             binary = ida_nalt.get_root_filename() or ""
             idb_path = idc.get_idb_path() or ""
             file_path = register_instance(
-                host=host,
+                host=self.host,
                 port=port,
                 pid=os.getpid(),
                 binary=binary,
